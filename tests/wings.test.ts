@@ -15,10 +15,15 @@ describe('🪽 wing slot machine (director 14 Nov)', () => {
   });
   it('wings come out rarely, Limited never while closed, a second copy turns into stars', () => {
     const s = rich(); let wings = 0, ltd = 0;
-    for (let i = 0; i < 3000; i++) { const r = spinWings(s, 10, rnd); if (typeof r !== 'object') { s.inventory.length = 0; continue; } for (const p of r.prizes) if (p.wing) { wings++; if (p.wing.startsWith('x_') || p.wing === 'ltd') ltd++; } s.inventory.length = 0; }
+    for (let i = 0; i < 3000; i++) { const r = spinWings(s, 10, rnd, false); if (typeof r !== 'object') { s.inventory.length = 0; continue; } for (const p of r.prizes) if (p.wing) { wings++; if (p.wing.startsWith('x_') || p.wing === 'ltd') ltd++; } s.inventory.length = 0; }
     expect(ltd).toBe(0);
     expect(wings / 30000).toBeGreaterThan(0.015); expect(wings / 30000).toBeLessThan(0.04);
     expect(s.wings!.length).toBeLessThanOrEqual(WINGS.length); expect((s.stars ?? 0)).toBeGreaterThan(0);
+  });
+  it('Limited wings can come out once the director opens them (CBT, kept for OBT)', () => {
+    const s = rich(); let ltd = 0;
+    for (let i = 0; i < 3000 && !ltd; i++) { const r = spinWings(s, 10, rnd, true); s.inventory.length = 0; if (typeof r === 'object') ltd += r.prizes.filter(p => p.wing && ['ltd', 'x_cosmos', 'x_fallen'].includes(p.wing)).length; }
+    expect(ltd).toBeGreaterThan(0);
   });
   it('only owned wings can be worn', () => {
     const s = rich(); expect(setWing(s, 'legend')).toBe(false); expect(activeWing(s)).toBeNull();

@@ -9,8 +9,8 @@ import { WINGS, WING_BY_ID, type WingTier } from '../data/wings';
 
 /** open to players (closed: the admin can try it) */
 export const WSLOT_OPEN = false;
-/** Limited wings can come out of the machine (kept for OBT — director) */
-export const WSLOT_LTD = false;
+/** Limited wings can come out of the machine — open now in CBT, and KEPT when the CBT data is wiped for OBT (director 14 Nov) */
+export const WSLOT_LTD = true;
 export const WSLOT_PRICE = 30, WSLOT_PRICE10 = 270;
 /** per 10,000 spins, each wing of the tier (never shown to players) */
 const WEIGHT: Record<WingTier, number> = { L: 40, SL: 12, X: 7 };

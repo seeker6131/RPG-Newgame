@@ -984,7 +984,8 @@ export class Panels implements GuildHost {
     const mh = H - 44, sc = mh / 118, mx = x + 14, my = y + 34;
     if (ui.textures.exists('ui_slot_machine')) c.add(ui.add.image(mx, my - 6 * sc, 'ui_slot_machine').setOrigin(0).setScale(sc));
     // the reels: a lit screen a little bigger than the cabinet's window (readable wings), framed in gold
-    const cx0 = mx + 60.5 * sc, cy0 = my + 51 * sc, ww = 31 * sc * 1.55, wh = 26 * sc * 1.35, wx = cx0 - ww / 2, wy = cy0 - wh / 2, rw = ww / 3;
+    const cx0 = mx + 64.5 * sc, cy0 = my + 41.5 * sc, ww = 45 * sc * 1.04, wh = 31 * sc * 1.04,   // (the front-facing cabinet, director: 2D like the game)
+      wx = cx0 - ww / 2, wy = cy0 - wh / 2, rw = ww / 3;
     const scr = ui.add.graphics(); scr.fillStyle(0x1a0e24, 1).fillRoundedRect(wx - 4, wy - 4, ww + 8, wh + 8, 5).lineStyle(3, 0xd9a83a, 1).strokeRoundedRect(wx - 4, wy - 4, ww + 8, wh + 8, 5)
       .fillStyle(0x2a1838, 1).fillRect(wx, wy, ww, wh).fillStyle(0xffffff, 0.06).fillRect(wx, wy, ww, wh * 0.35); c.add(scr);
     const reels: Phaser.GameObjects.Image[] = [];
