@@ -8,7 +8,7 @@ import { invSize } from '../core/state';
 import { WINGS, WING_BY_ID, type WingTier } from '../data/wings';
 
 /** open to players (closed: the admin can try it) */
-export const WSLOT_OPEN = false;
+export const WSLOT_OPEN = true;   // (opened 14 Nov 23:00 — director)
 /** Limited wings can come out of the machine — open now in CBT, and KEPT when the CBT data is wiped for OBT (director 14 Nov) */
 export const WSLOT_LTD = true;
 export const WSLOT_PRICE = 30, WSLOT_PRICE10 = 270;
