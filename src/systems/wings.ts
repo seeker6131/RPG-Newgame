@@ -16,8 +16,9 @@ export const WSLOT_PRICE = 30, WSLOT_PRICE10 = 270;
 const WEIGHT: Record<WingTier, number> = { L: 40, SL: 12, X: 7 };
 /** a wing already owned turns into ⭐ star coins */
 const DUP_STARS: Record<WingTier, number> = { L: 15, SL: 40, X: 80 };
-/** everything else: a small useful prize (never gear / elixirs / shards — no pay-to-win) */
-export const CONSOLATION = [{ id: 'hp_potion_l', qty: 5 }, { id: 'scroll_return', qty: 5 }] as const;
+/** no salt (director 14 Nov): what is not a wing is the god elixir (rarer) or 5,000 gold */
+export const SLOT_GOLD = 5000, SLOT_ELIXIR = 'elix_god';
+const ELIXIR_W = 900;   // per 10,000 spins (never shown)
 
 type WS = GameState & { wings?: string[]; wingOn?: string; petOn?: string; diamonds?: number; stars?: number };
 export const wingsOf = (s: GameState) => (s as WS).wings ?? [];
@@ -34,7 +35,7 @@ export function setWing(s: GameState, id: string | null) {
 /** the storm cloud is being put on: the wings come off (the other half of "one at a time") */
 export function wingsOffForCloud(s: GameState) { (s as WS).wingOn = 'none'; }
 
-export interface WPrize { wing?: string; item?: { id: string; qty: number }; stars?: number; text: string }
+export interface WPrize { wing?: string; item?: { id: string; qty: number }; gold?: number; stars?: number; text: string }
 function roll(rnd: () => number, ltd: boolean): string | null {
   let r = rnd() * 10000;
   for (const w of WINGS) { if (w.tier === 'X' && !ltd) continue; r -= WEIGHT[w.tier]; if (r < 0) return w.id; }
@@ -55,8 +56,8 @@ export function spinWings(s: GameState, n: number, rnd: () => number, ltd = WSLO
       if (ownsWing(s, id)) { const st = DUP_STARS[w.tier]; p.stars = (p.stars ?? 0) + st; prizes.push({ wing: id, stars: st, text: `${w.name} (มีแล้ว → ⭐ ${st})` }); }
       else { (p.wings ??= []).push(id); prizes.push({ wing: id, text: `🪽 ${w.name}!` }); }
     } else {
-      const c = CONSOLATION[Math.floor(rnd() * CONSOLATION.length)];
-      addItem(s, c.id, c.qty); prizes.push({ item: { id: c.id, qty: c.qty }, text: '' });
+      if (rnd() * 10000 < ELIXIR_W) { addItem(s, SLOT_ELIXIR, 1); prizes.push({ item: { id: SLOT_ELIXIR, qty: 1 }, text: '' }); }
+      else { s.gold += SLOT_GOLD; prizes.push({ gold: SLOT_GOLD, text: '' }); }
     }
   }
   return { prizes, cost };

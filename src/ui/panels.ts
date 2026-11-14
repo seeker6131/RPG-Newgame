@@ -1,6 +1,6 @@
 import { tdQuest, rewardText } from '../systems/tdQuests';
 import { WINGS, WING_BY_ID, WING_SPEED, TIER_NAME, TIER_COL } from '../data/wings';
-import { activeWing, ownsWing, setWing, wingsOf, WSLOT_OPEN, WSLOT_LTD, WSLOT_PRICE, WSLOT_PRICE10, type WPrize } from '../systems/wings';
+import { activeWing, ownsWing, setWing, wingsOf, WSLOT_OPEN, WSLOT_LTD, WSLOT_PRICE, WSLOT_PRICE10, SLOT_GOLD, SLOT_ELIXIR, type WPrize } from '../systems/wings';
 import { ensureAllWings } from '../world/wingView';
 import { hasSkin, panelFrame, skillIconKey } from './skin';
 // Modal panels: Bag/Equipment, Stats/Skills, Quests, Menu, NPC dialog, Shop, Blacksmith.
@@ -973,63 +973,60 @@ export class Panels implements GuildHost {
       } });
   }
   // ---------------- 🎰 the wing slot machine (systems/wings.ts — director: the only way to get wings, no chances shown) ----------------
-  slot = { spinning: false, reels: ['legend', 'sl', 'ltd'] as string[], hit: '' as string, lines: [] as string[] };
+  slot = { spinning: false, sym: 'legend' as string, hit: false, lines: [] as string[] };
   buildWSlot(c: Phaser.GameObjects.Container) {
     const s = S() as ReturnType<typeof S> & { diamonds?: number }, ui = this.ui, k = this.k;
     const W = Math.min(580, ui.VW - 16), H = 320;
-    const { x, y, g } = this.window(c, W, H, WSLOT_OPEN ? '🎰 ตู้สุ่มปีก' : '🎰 ตู้สุ่มปีก (แอดมินทดสอบ — ผู้เล่นยังไม่เห็น)');
-    const pool = WINGS.filter(w => w.tier !== 'X' || WSLOT_LTD).map(w => w.id);
-    if (!ui.textures.exists('wing_' + pool[0]) || pool.some(id => !ui.textures.exists('wing_' + id))) { c.add(k.text(x + W / 2, y + H / 2, 'กำลังโหลด...', 10, '#ffe7a0').setOrigin(0.5)); ensureAllWings(ui, WINGS.map(w => w.id), () => { if (this.cur === 'wslot') this.rebuild(); }); return; }
-    // the machine (PixelLab) with three reels in its window
+    const { x, y } = this.window(c, W, H, WSLOT_OPEN ? '🎰 ตู้สุ่มปีก' : '🎰 ตู้สุ่มปีก (แอดมินทดสอบ — ผู้เล่นยังไม่เห็น)');
+    const wingsIn = WINGS.filter(w => w.tier !== 'X' || WSLOT_LTD).map(w => w.id);
+    if (wingsIn.some(id => !ui.textures.exists('wing_' + id))) { c.add(k.text(x + W / 2, y + H / 2, 'กำลังโหลด...', 10, '#ffe7a0').setOrigin(0.5)); ensureAllWings(ui, WINGS.map(w => w.id), () => { if (this.cur === 'wslot') this.rebuild(); }); return; }
+    // one window, one picture (director): what stops in front of the machine is what you get — wings, the god elixir or gold
+    const syms = [...wingsIn, 'gold', 'elixir', 'gold', 'elixir'];
     const mh = H - 44, sc = mh / 118, mx = x + 14, my = y + 34;
     if (ui.textures.exists('ui_slot_machine')) c.add(ui.add.image(mx, my - 6 * sc, 'ui_slot_machine').setOrigin(0).setScale(sc));
-    // the reels: a lit screen a little bigger than the cabinet's window (readable wings), framed in gold
-    const cx0 = mx + 64.5 * sc, cy0 = my + 41.5 * sc, ww = 45 * sc * 1.04, wh = 31 * sc * 1.04,   // (the front-facing cabinet, director: 2D like the game)
-      wx = cx0 - ww / 2, wy = cy0 - wh / 2, rw = ww / 3;
+    const cx0 = mx + 64.5 * sc, cy0 = my + 41.5 * sc, ww = 45 * sc * 1.04, wh = 31 * sc * 1.04, wx = cx0 - ww / 2, wy = cy0 - wh / 2;   // (the front-facing cabinet — director: 2D like the game)
     const scr = ui.add.graphics(); scr.fillStyle(0x1a0e24, 1).fillRoundedRect(wx - 4, wy - 4, ww + 8, wh + 8, 5).lineStyle(3, 0xd9a83a, 1).strokeRoundedRect(wx - 4, wy - 4, ww + 8, wh + 8, 5)
       .fillStyle(0x2a1838, 1).fillRect(wx, wy, ww, wh).fillStyle(0xffffff, 0.06).fillRect(wx, wy, ww, wh * 0.35); c.add(scr);
-    const reels: Phaser.GameObjects.Image[] = [];
-    for (let i = 0; i < 3; i++) {
-      const id = this.slot.reels[i], im = ui.add.image(wx + rw * (i + 0.5), wy + wh / 2, 'wing_' + id, 0);
-      im.setScale(Math.min((rw - 3) / im.width, (wh - 4) / im.height)); c.add(im); reels.push(im);
-      if (i) scr.lineStyle(1, 0x8a6a30, 1).lineBetween(wx + rw * i, wy, wx + rw * i, wy + wh);
-    }
-    const win = this.slot.hit && !this.slot.spinning ? WING_BY_ID[this.slot.hit] : null;
-    if (win) scr.lineStyle(3, TIER_COL[win.tier], 1).strokeRoundedRect(wx - 6, wy - 6, ww + 12, wh + 12, 6);
-    // the right side: price, buttons, what came out
+    const show = (im: Phaser.GameObjects.Image, sym: string) => {
+      const tex = sym === 'gold' ? 'icon_gold' : sym === 'elixir' ? 'icon_' + itemDef(SLOT_ELIXIR).icon : 'wing_' + sym;
+      if (ui.textures.exists(tex)) im.setTexture(tex, sym === 'gold' || sym === 'elixir' ? undefined : 0);
+      const big = sym === 'gold' || sym === 'elixir' ? 0.62 : 0.94; im.setScale(Math.min(ww * big / im.width, wh * big / im.height));
+    };
+    const pic = ui.add.image(cx0, cy0, 'wing_legend', 0); show(pic, this.slot.sym); c.add(pic);
+    const label = (sym: string) => sym === 'gold' ? `💰 ทอง ${SLOT_GOLD.toLocaleString()}` : sym === 'elixir' ? `🧪 ${itemDef(SLOT_ELIXIR).name}` : `🪽 ${WING_BY_ID[sym].name} [${TIER_NAME[WING_BY_ID[sym].tier]}]`;
+    const symCol = (sym: string) => WING_BY_ID[sym] ? TIER_COL[WING_BY_ID[sym].tier] : sym === 'elixir' ? 0xffa53a : 0xffd84a;
+    if (!this.slot.spinning && this.slot.lines.length) { scr.lineStyle(3, symCol(this.slot.sym), 1).strokeRoundedRect(wx - 7, wy - 7, ww + 14, wh + 14, 7); c.add(k.text(cx0, wy + wh + 10, label(this.slot.sym), 8, '#' + symCol(this.slot.sym).toString(16).padStart(6, '0')).setOrigin(0.5, 0)); }
+    // the right side: price, what is inside, buttons, what came out
     const rx = mx + 128 * sc * 0.82, rwid = x + W - 14 - rx;
     c.add(k.text(rx, y + 58, `หมุนครั้งละ 💎 ${WSLOT_PRICE}  •  10 ครั้ง 💎 ${WSLOT_PRICE10}`, 9, '#ffe7a0'));
     c.add(k.text(rx, y + 74, `มี 💎 ${(s.diamonds ?? 0).toLocaleString()}  •  ปีกของฉัน ${wingsOf(s).length}/${WINGS.length}`, 9, '#c8e8ff'));
-    c.add(k.text(rx, y + 90, '🪽 ใส่แล้วตัวลอย วิ่งเร็วขึ้น: Legend +3% • SL +5% • Limited +10%\nใส่ได้ทีละอย่าง: พาหนะ / ปีก / เมฆพายุ', 7.5, '#c8b898', { wordWrap: { width: rwid } }));
+    c.add(k.text(rx, y + 90, `ในตู้: 🪽 ปีก Legend / SL${WSLOT_LTD ? ' / Limited' : ''} • 🧪 ${itemDef(SLOT_ELIXIR).name} • 💰 ทอง ${SLOT_GOLD.toLocaleString()}\n🪽 ใส่แล้วตัวลอย วิ่งเร็วขึ้น: Legend +3% • SL +5% • Limited +10%`, 7.5, '#c8b898', { wordWrap: { width: rwid } }));
     const spin = (n: number) => {
       if (this.slot.spinning) return;
       const cost = n === 10 ? WSLOT_PRICE10 : WSLOT_PRICE;
       if ((s.diamonds ?? 0) < cost) { sfx.error(); bus.emit(EV.TOAST, 'เพชรไม่พอ — เติมเพชรที่ร้าน 💎', '#ff8a6a'); return; }
-      this.slot.spinning = true; this.slot.hit = ''; this.slot.lines = []; sfx.click();
-      const t0 = ui.time.now; let res: { prizes: WPrize[] } | null = null, err = '';
+      this.slot.spinning = true; sfx.click();   // (no rebuild while it spins: the picture below keeps turning)
+      const t0 = ui.time.now; let res: { prizes: WPrize[] } | null = null, err = '', step = 70;
       actServer('wingSlot', { n }).then(r => { if (refused(r)) err = r.refused; else res = r as unknown as { prizes: WPrize[] }; });
-      const ev = ui.time.addEvent({ delay: 70, loop: true, callback: () => {
-        const el = ui.time.now - t0, done = res || err;
-        reels.forEach((im, i) => {
-          const stop = done && el > 900 + i * 380;
-          if (!stop) { im.setTexture('wing_' + pool[Math.floor(Math.random() * pool.length)], 0); im.setScale(Math.min((rw - 3) / im.width, (wh - 4) / im.height)); }
-        });
-        if (!done || el < 900 + 2 * 380 + 140) return;
-        ev.remove(); this.slot.spinning = false;
+      const tick = () => {
+        const el = ui.time.now - t0, done = res || err, img = pic;
+        if (!done || el < 1500) { if (img.active) { show(img, syms[Math.floor(Math.random() * syms.length)]); sfx.click(); } if (done) step = Math.min(260, step * 1.18); ui.time.delayedCall(step, tick); return; }
+        this.slot.spinning = false;
         if (err) { sfx.error(); bus.emit(EV.TOAST, err === 'diamonds' ? 'เพชรไม่พอ' : err === 'bag' ? 'กระเป๋าเต็ม — เว้นช่องว่างอย่างน้อย 2 ช่อง' : err === 'closed' ? 'ตู้ยังไม่เปิด' : 'หมุนไม่สำเร็จ ลองใหม่', '#ff8a6a'); this.rebuild(); return; }
-        const ps = res!.prizes, best = ps.filter(p => p.wing).sort((a, b) => 'XSL'.indexOf(WING_BY_ID[a.wing!].tier[0]) - 'XSL'.indexOf(WING_BY_ID[b.wing!].tier[0]))[0];
-        if (best) { this.slot.reels = [best.wing!, best.wing!, best.wing!]; this.slot.hit = best.wing!; sfx.levelUp(); }
-        else { const r3 = () => pool[Math.floor(Math.random() * pool.length)]; let a = r3(), b = r3(); while (b === a) b = r3(); this.slot.reels = [a, b, r3()]; sfx.coin(); }
-        this.slot.lines = ps.map(p => p.wing ? (p.stars ? `🪽 ${WING_BY_ID[p.wing].name} (มีแล้ว → ⭐ ${p.stars})` : `🪽 ${WING_BY_ID[p.wing].name} [${TIER_NAME[WING_BY_ID[p.wing].tier]}]!`) : `${itemDef(p.item!.id).name} x${p.item!.qty}`);
+        const ps = res!.prizes, rank = (p: WPrize) => p.wing ? (p.stars ? 3 : 10) + 'L SL X'.split(' ').indexOf(WING_BY_ID[p.wing].tier) : p.item ? 2 : 1;
+        const best = [...ps].sort((a, b) => rank(b) - rank(a))[0];
+        this.slot.sym = best.wing ?? (best.item ? 'elixir' : 'gold');
+        if (best.wing) sfx.levelUp(); else if (best.item) sfx.chest(); else sfx.coin();
+        this.slot.lines = ps.map(p => p.wing ? (p.stars ? `🪽 ${WING_BY_ID[p.wing].name} (มีแล้ว → ⭐ ${p.stars})` : `🪽 ${WING_BY_ID[p.wing].name} [${TIER_NAME[WING_BY_ID[p.wing].tier]}]!`) : p.item ? `🧪 ${itemDef(p.item.id).name}` : `💰 ทอง ${(p.gold ?? 0).toLocaleString()}`);
         for (const p of ps) if (p.wing && !p.stars) bus.emit(EV.TOAST, `🪽 ได้ ${WING_BY_ID[p.wing].name}! ใส่ได้ที่ กระเป๋า → ⛈ ผู้ติดตาม`, '#ffd84a');
         saveGame(S()); bus.emit(EV.STATE_CHANGED); this.rebuild();
-      } });
+      };
+      ui.time.delayedCall(step, tick);
     };
     const busy = this.slot.spinning;
     c.add(k.button(rx, y + 124, rwid, 26, `🎰 หมุน 1 ครั้ง  •  💎 ${WSLOT_PRICE}`, () => spin(1), { size: 9, color: 0x6a2a6a, disabled: busy }));
     c.add(k.button(rx, y + 154, rwid, 26, `🎰 หมุน 10 ครั้ง  •  💎 ${WSLOT_PRICE10}`, () => spin(10), { size: 9, color: 0x8a3a1a, disabled: busy }));
-    if (win) c.add(k.text(rx, y + 186, `✨ ${win.name} [${TIER_NAME[win.tier]}]`, 10, '#' + TIER_COL[win.tier].toString(16).padStart(6, '0')));
-    this.slot.lines.slice(0, 10).forEach((l, i) => c.add(k.text(rx + (i >= 5 ? rwid / 2 : 0), y + 202 + (i % 5) * 12, l, 7.5, l.startsWith('🪽') ? '#ffd84a' : '#d9c8a0', { wordWrap: { width: rwid / (this.slot.lines.length > 5 ? 2 : 1) - 4 } })));
+    this.slot.lines.slice(0, 10).forEach((l, i) => c.add(k.text(rx + (i >= 5 ? rwid / 2 : 0), y + 188 + (i % 5) * 13, l, 7.5, l.startsWith('🪽') ? '#ffd84a' : l.startsWith('🧪') ? '#ffb86a' : '#d9c8a0', { wordWrap: { width: rwid / (this.slot.lines.length > 5 ? 2 : 1) - 4 } })));
     c.add(k.button(rx, y + H - 36, rwid, 22, '🪽 ปีกของฉัน (ใส่ / ถอด)', () => { this.bagTab = 'pets'; this.open('bag'); }, { size: 8.5, color: 0x2a4a5a }));
   }
   wheelName(p: WheelPrize) { return p.res ? `${p.res === 'wood' ? '🪵 ไม้' : p.res === 'stone' ? '🪨 หิน' : '🍖 อาหาร'} ${p.qty}` : `${itemDef(p.id!).name}${p.qty > 1 ? ' x' + p.qty : ''}${p.rar !== undefined && p.rar >= 2 ? ` [${RARITY_NAMES[p.rar]}]` : ''}`; }
