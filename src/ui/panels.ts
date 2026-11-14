@@ -1,4 +1,7 @@
 import { tdQuest, rewardText } from '../systems/tdQuests';
+import { WINGS, WING_BY_ID, WING_SPEED, TIER_NAME, TIER_COL } from '../data/wings';
+import { activeWing, ownsWing, setWing, wingsOf, WSLOT_OPEN, WSLOT_LTD, WSLOT_PRICE, WSLOT_PRICE10, type WPrize } from '../systems/wings';
+import { ensureAllWings } from '../world/wingView';
 import { hasSkin, panelFrame, skillIconKey } from './skin';
 // Modal panels: Bag/Equipment, Stats/Skills, Quests, Menu, NPC dialog, Shop, Blacksmith.
 import Phaser from 'phaser';
@@ -70,7 +73,7 @@ import { testBots, BOT_STEPS } from '../core/testBots';
 import { buildGuild, buildStash, buildTrophy, type GuildTab, type GuildHost } from './guildPanels';
 import type { DefenseId } from '../data/guild';
 
-type PanelId = 'chars' | 'charsend' | 'wardrobe' | 'bag' | 'stats' | 'quest' | 'menu' | 'shop' | 'smith' | 'dialog' | 'plot' | 'job' | 'forms' | 'uiopt' | 'stages' | 'premium' | 'market' | 'alchemy' | 'login' | 'collection' | 'dungeon' | 'profile' | 'guild' | 'stash' | 'trophy' | 'bounty' | 'mounts' | 'potion' | 'farm' | 'cbt' | 'mail' | 'lootopt' | 'wheel' | 'pick' | 'dwheel';
+type PanelId = 'chars' | 'charsend' | 'wardrobe' | 'bag' | 'stats' | 'quest' | 'menu' | 'shop' | 'smith' | 'dialog' | 'plot' | 'job' | 'forms' | 'uiopt' | 'stages' | 'premium' | 'market' | 'alchemy' | 'login' | 'collection' | 'dungeon' | 'profile' | 'guild' | 'stash' | 'trophy' | 'bounty' | 'mounts' | 'potion' | 'farm' | 'cbt' | 'mail' | 'lootopt' | 'wheel' | 'pick' | 'dwheel' | 'wslot';
 
 const NPC_INFO: Record<string, { name: string; tex: string }> = {
   elder: { name: 'ผู้เฒ่าอัลดริค', tex: 'npc_elder' },
@@ -170,6 +173,7 @@ export class Panels implements GuildHost {
       case 'lootopt': this.buildLootOpt(c); break;
       case 'wheel': this.buildWheel(c); break;
       case 'dwheel': this.buildDWheel(c); break;
+      case 'wslot': this.buildWSlot(c); break;
       case 'pick': this.buildPick(c); break;
       case 'dialog': this.buildDialog(c); break;
       case 'shop': this.buildShop(c); break;
@@ -300,7 +304,12 @@ export class Panels implements GuildHost {
     const list: E[] = [];
     if (pets) {
       if (cosOwned(s, 'pet')) list.push({ id: 'cloud', name: '⛈ เมฆพายุ', desc: 'ลอยเหนือหัว มีฟ้าแลบ ผู้เล่นคนอื่นเห็น\n💨 วิ่งเร็วขึ้น 5%\n⚡ ลูกศรชี้ทางไปบอสเร่ร่อน + จุดบนแผนที่เล็ก\n⚡ บอกเมื่อบอสโผล่แผนที่อื่น', tex: 'pet_cloud', frame: 0, emoji: '⛈', on: cosOn(s, 'pet'),
-        use: () => act('cosmetic', { k: 'pet', on: true }), off: () => act('cosmetic', { k: 'pet', on: false }) });
+        use: () => { setWing(s, null); if (mountOn(s)) act('mountSelect', { id: null }); act('cosmetic', { k: 'pet', on: true }); }, off: () => act('cosmetic', { k: 'pet', on: false }) });   // (one at a time: mount / wings / cloud — director)
+      // 🪽 wings (the slot machine): float, flap, walk faster
+      const owned = WINGS.filter(w => ownsWing(s, w.id));
+      if (owned.length && owned.some(w => !ui.textures.exists('wing_' + w.id))) ensureAllWings(ui, owned.map(w => w.id), () => { if (this.cur === 'bag') this.rebuild(); });
+      for (const w of owned) list.push({ id: 'wing:' + w.id, name: `🪽 ${w.name}`, desc: `[${TIER_NAME[w.tier]}] ใส่แล้วตัวลอย ปีกกระพือ ผู้เล่นคนอื่นเห็น\n💨 วิ่งเร็วขึ้น ${Math.round((WING_SPEED[w.tier] - 1) * 100)}%${w.tier === 'X' ? '\n✨ ออร่าพิเศษ' : w.tier === 'SL' ? '\n✨ ออร่าบาง' : ''}\nใส่ได้ทีละอย่าง: พาหนะ / ปีก / เมฆพายุ`, tex: 'wing_' + w.id, frame: 0, emoji: '🪽', on: activeWing(s)?.id === w.id,
+        use: () => { setWing(s, w.id); if (mountOn(s)) act('mountSelect', { id: null }); if (cosOn(s, 'pet')) act('cosmetic', { k: 'pet', on: false }); }, off: () => { setWing(s, null); } });
     } else {
       const ride = mountOn(s), black = !!activeHorseSkin(s);
       for (const id of MOUNT_ORDER) {
@@ -308,7 +317,7 @@ export class Panels implements GuildHost {
         const d = MOUNTS[id], vs: (string | null)[] = id === 'horse' && cosOwned(s, 'horse') ? [null, 'horse_black'] : [null];
         for (const skin of vs) list.push({ id: id + (skin ?? ''), name: skin ? '🐴 ม้าดำนิล' : d.name, desc: `💨 วิ่งเร็วขึ้น ${Math.round((rideSpeed(d.speed, skin) - 1) * 100)}%\n${skin ? 'ม้าศึกสีดำนิล — เร็วกว่าม้าปกติ' : d.desc}`, tex: `m_${d.key}_idle`, frame: 1, tint: skin ? SKIN_TINT[skin] : undefined,
           on: ride === id && (id !== 'horse' || black === !!skin),
-          use: () => { if (id === 'horse' && cosOwned(s, 'horse')) act('cosmetic', { k: 'horse', on: !!skin }); act('mountSelect', { id }); },
+          use: () => { setWing(s, null); if (cosOn(s, 'pet')) act('cosmetic', { k: 'pet', on: false }); if (id === 'horse' && cosOwned(s, 'horse')) act('cosmetic', { k: 'horse', on: !!skin }); act('mountSelect', { id }); },
           off: () => act('mountSelect', { id: null }) });
       }
     }
@@ -317,7 +326,7 @@ export class Panels implements GuildHost {
     list.forEach((q, i) => {
       const cx = x + (i % 3) * (cs + gap), cy = y + Math.floor(i / 3) * (cs + gap + 12);
       k.iconSlot(g, cx, cy, cs, q.on ? 0xffd84a : 0x8a6a40, q === sel);
-      if (ui.textures.exists(q.tex)) { const im = ui.add.image(cx + cs / 2, cy + cs / 2 + (pets ? 0 : 6), q.tex, ui.textures.get(q.tex).has(String(q.frame)) || pets ? (pets ? undefined : q.frame) : undefined); im.setScale(Math.min((cs - 6) / im.width, (cs - 6) / im.height) * (pets ? 1.3 : 1.25)); if (q.tint) im.setTint(q.tint); c.add(im); }
+      if (ui.textures.exists(q.tex)) { const im = ui.add.image(cx + cs / 2, cy + cs / 2 + (pets ? 0 : 6), q.tex, ui.textures.get(q.tex).has(String(q.frame)) || pets ? (pets && !q.tex.startsWith('wing_') ? undefined : q.frame) : undefined); im.setScale(Math.min((cs - 6) / im.width, (cs - 6) / im.height) * (pets ? 1.3 : 1.25)); if (q.tint) im.setTint(q.tint); c.add(im); }
       else c.add(k.text(cx + cs / 2, cy + cs / 2, q.emoji ?? '🐎', 22).setOrigin(0.5));
       if (q.on) c.add(k.text(cx + 3, cy + 2, 'E', 9, '#ffd84a'));
       c.add(k.text(cx + cs / 2, cy + cs + 1, q.name.replace(/^[^\s]+ /, ''), 7, q.on ? '#ffd84a' : '#d9c8a0').setOrigin(0.5, 0));
@@ -963,6 +972,65 @@ export class Panels implements GuildHost {
         cc.add(k.button(ex + half + 6, ey, half, 24, `⭐${STAR_TRADE} → ⛈ เมฆ`, () => trade('cloud'), { size: 8, color: 0x3a2a6a, disabled: !ok }));
       } });
   }
+  // ---------------- 🎰 the wing slot machine (systems/wings.ts — director: the only way to get wings, no chances shown) ----------------
+  slot = { spinning: false, reels: ['legend', 'sl', 'ltd'] as string[], hit: '' as string, lines: [] as string[] };
+  buildWSlot(c: Phaser.GameObjects.Container) {
+    const s = S() as ReturnType<typeof S> & { diamonds?: number }, ui = this.ui, k = this.k;
+    const W = Math.min(580, ui.VW - 16), H = 320;
+    const { x, y, g } = this.window(c, W, H, WSLOT_OPEN ? '🎰 ตู้สุ่มปีก' : '🎰 ตู้สุ่มปีก (แอดมินทดสอบ — ผู้เล่นยังไม่เห็น)');
+    const pool = WINGS.filter(w => w.tier !== 'X' || WSLOT_LTD).map(w => w.id);
+    if (!ui.textures.exists('wing_' + pool[0]) || pool.some(id => !ui.textures.exists('wing_' + id))) { c.add(k.text(x + W / 2, y + H / 2, 'กำลังโหลด...', 10, '#ffe7a0').setOrigin(0.5)); ensureAllWings(ui, WINGS.map(w => w.id), () => { if (this.cur === 'wslot') this.rebuild(); }); return; }
+    // the machine (PixelLab) with three reels in its window
+    const mh = H - 44, sc = mh / 118, mx = x + 14, my = y + 34;
+    if (ui.textures.exists('ui_slot_machine')) c.add(ui.add.image(mx, my - 6 * sc, 'ui_slot_machine').setOrigin(0).setScale(sc));
+    // the reels: a lit screen a little bigger than the cabinet's window (readable wings), framed in gold
+    const cx0 = mx + 60.5 * sc, cy0 = my + 51 * sc, ww = 31 * sc * 1.55, wh = 26 * sc * 1.35, wx = cx0 - ww / 2, wy = cy0 - wh / 2, rw = ww / 3;
+    const scr = ui.add.graphics(); scr.fillStyle(0x1a0e24, 1).fillRoundedRect(wx - 4, wy - 4, ww + 8, wh + 8, 5).lineStyle(3, 0xd9a83a, 1).strokeRoundedRect(wx - 4, wy - 4, ww + 8, wh + 8, 5)
+      .fillStyle(0x2a1838, 1).fillRect(wx, wy, ww, wh).fillStyle(0xffffff, 0.06).fillRect(wx, wy, ww, wh * 0.35); c.add(scr);
+    const reels: Phaser.GameObjects.Image[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = this.slot.reels[i], im = ui.add.image(wx + rw * (i + 0.5), wy + wh / 2, 'wing_' + id, 0);
+      im.setScale(Math.min((rw - 3) / im.width, (wh - 4) / im.height)); c.add(im); reels.push(im);
+      if (i) scr.lineStyle(1, 0x8a6a30, 1).lineBetween(wx + rw * i, wy, wx + rw * i, wy + wh);
+    }
+    const win = this.slot.hit && !this.slot.spinning ? WING_BY_ID[this.slot.hit] : null;
+    if (win) scr.lineStyle(3, TIER_COL[win.tier], 1).strokeRoundedRect(wx - 6, wy - 6, ww + 12, wh + 12, 6);
+    // the right side: price, buttons, what came out
+    const rx = mx + 128 * sc * 0.82, rwid = x + W - 14 - rx;
+    c.add(k.text(rx, y + 58, `หมุนครั้งละ 💎 ${WSLOT_PRICE}  •  10 ครั้ง 💎 ${WSLOT_PRICE10}`, 9, '#ffe7a0'));
+    c.add(k.text(rx, y + 74, `มี 💎 ${(s.diamonds ?? 0).toLocaleString()}  •  ปีกของฉัน ${wingsOf(s).length}/${WINGS.length}`, 9, '#c8e8ff'));
+    c.add(k.text(rx, y + 90, '🪽 ใส่แล้วตัวลอย วิ่งเร็วขึ้น: Legend +3% • SL +5% • Limited +10%\nใส่ได้ทีละอย่าง: พาหนะ / ปีก / เมฆพายุ', 7.5, '#c8b898', { wordWrap: { width: rwid } }));
+    const spin = (n: number) => {
+      if (this.slot.spinning) return;
+      const cost = n === 10 ? WSLOT_PRICE10 : WSLOT_PRICE;
+      if ((s.diamonds ?? 0) < cost) { sfx.error(); bus.emit(EV.TOAST, 'เพชรไม่พอ — เติมเพชรที่ร้าน 💎', '#ff8a6a'); return; }
+      this.slot.spinning = true; this.slot.hit = ''; this.slot.lines = []; sfx.click();
+      const t0 = ui.time.now; let res: { prizes: WPrize[] } | null = null, err = '';
+      actServer('wingSlot', { n }).then(r => { if (refused(r)) err = r.refused; else res = r as unknown as { prizes: WPrize[] }; });
+      const ev = ui.time.addEvent({ delay: 70, loop: true, callback: () => {
+        const el = ui.time.now - t0, done = res || err;
+        reels.forEach((im, i) => {
+          const stop = done && el > 900 + i * 380;
+          if (!stop) { im.setTexture('wing_' + pool[Math.floor(Math.random() * pool.length)], 0); im.setScale(Math.min((rw - 3) / im.width, (wh - 4) / im.height)); }
+        });
+        if (!done || el < 900 + 2 * 380 + 140) return;
+        ev.remove(); this.slot.spinning = false;
+        if (err) { sfx.error(); bus.emit(EV.TOAST, err === 'diamonds' ? 'เพชรไม่พอ' : err === 'bag' ? 'กระเป๋าเต็ม — เว้นช่องว่างอย่างน้อย 2 ช่อง' : err === 'closed' ? 'ตู้ยังไม่เปิด' : 'หมุนไม่สำเร็จ ลองใหม่', '#ff8a6a'); this.rebuild(); return; }
+        const ps = res!.prizes, best = ps.filter(p => p.wing).sort((a, b) => 'XSL'.indexOf(WING_BY_ID[a.wing!].tier[0]) - 'XSL'.indexOf(WING_BY_ID[b.wing!].tier[0]))[0];
+        if (best) { this.slot.reels = [best.wing!, best.wing!, best.wing!]; this.slot.hit = best.wing!; sfx.levelUp(); }
+        else { const r3 = () => pool[Math.floor(Math.random() * pool.length)]; let a = r3(), b = r3(); while (b === a) b = r3(); this.slot.reels = [a, b, r3()]; sfx.coin(); }
+        this.slot.lines = ps.map(p => p.wing ? (p.stars ? `🪽 ${WING_BY_ID[p.wing].name} (มีแล้ว → ⭐ ${p.stars})` : `🪽 ${WING_BY_ID[p.wing].name} [${TIER_NAME[WING_BY_ID[p.wing].tier]}]!`) : `${itemDef(p.item!.id).name} x${p.item!.qty}`);
+        for (const p of ps) if (p.wing && !p.stars) bus.emit(EV.TOAST, `🪽 ได้ ${WING_BY_ID[p.wing].name}! ใส่ได้ที่ กระเป๋า → ⛈ ผู้ติดตาม`, '#ffd84a');
+        saveGame(S()); bus.emit(EV.STATE_CHANGED); this.rebuild();
+      } });
+    };
+    const busy = this.slot.spinning;
+    c.add(k.button(rx, y + 124, rwid, 26, `🎰 หมุน 1 ครั้ง  •  💎 ${WSLOT_PRICE}`, () => spin(1), { size: 9, color: 0x6a2a6a, disabled: busy }));
+    c.add(k.button(rx, y + 154, rwid, 26, `🎰 หมุน 10 ครั้ง  •  💎 ${WSLOT_PRICE10}`, () => spin(10), { size: 9, color: 0x8a3a1a, disabled: busy }));
+    if (win) c.add(k.text(rx, y + 186, `✨ ${win.name} [${TIER_NAME[win.tier]}]`, 10, '#' + TIER_COL[win.tier].toString(16).padStart(6, '0')));
+    this.slot.lines.slice(0, 10).forEach((l, i) => c.add(k.text(rx + (i >= 5 ? rwid / 2 : 0), y + 202 + (i % 5) * 12, l, 7.5, l.startsWith('🪽') ? '#ffd84a' : '#d9c8a0', { wordWrap: { width: rwid / (this.slot.lines.length > 5 ? 2 : 1) - 4 } })));
+    c.add(k.button(rx, y + H - 36, rwid, 22, '🪽 ปีกของฉัน (ใส่ / ถอด)', () => { this.bagTab = 'pets'; this.open('bag'); }, { size: 8.5, color: 0x2a4a5a }));
+  }
   wheelName(p: WheelPrize) { return p.res ? `${p.res === 'wood' ? '🪵 ไม้' : p.res === 'stone' ? '🪨 หิน' : '🍖 อาหาร'} ${p.qty}` : `${itemDef(p.id!).name}${p.qty > 1 ? ' x' + p.qty : ''}${p.rar !== undefined && p.rar >= 2 ? ` [${RARITY_NAMES[p.rar]}]` : ''}`; }
   // ---------------- 👑 VIP loot settings (systems/lootOpt.ts) ----------------
   buildLootOpt(c: Phaser.GameObjects.Container) {
@@ -1152,6 +1220,7 @@ export class Panels implements GuildHost {
     b('⛶ เต็มจอ', () => { this.close(); ui.toggleFullscreen(); });
     b('🖥 ปรับ UI & เสียง (แถบเลื่อน)', () => this.open('uiopt'), 0x2a4a5a);
     b(lang() === 'en' ? '🌐 ภาษาไทย' : '🌐 Language: English', () => { saveGame(s); setLang(lang() === 'en' ? 'th' : 'en'); location.reload(); }, 0x2a4a5a);
+    if (WSLOT_OPEN || isAdmin()) b(WSLOT_OPEN ? '🎰 ตู้สุ่มปีก' : '🎰 ตู้สุ่มปีก (แอดมินทดสอบ — ผู้เล่นยังไม่เห็น)', () => this.open('wslot'), 0x6a2a6a);
     if (DWHEEL_OPEN || isAdmin()) b(DWHEEL_OPEN ? '💎 กงล้อเพชร' : '💎 กงล้อเพชร (แอดมินทดสอบ — ผู้เล่นยังไม่เห็น)', () => this.open('dwheel'), 0x3a2a6a);
     if (WHEEL_OPEN || isAdmin()) b(WHEEL_OPEN ? '🎡 กงล้อนำโชค' : '🎡 กงล้อนำโชค (แอดมินทดสอบ — ผู้เล่นยังไม่เห็น)', () => this.open('wheel'), 0x6a4a10);
     if (isAdmin()) b('👑 แอดมิน: เปลี่ยนอาชีพ / ร่าง', () => this.open('forms'), 0x5a4a10);   // (the director's account only)

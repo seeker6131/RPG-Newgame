@@ -30,6 +30,7 @@ import { addItem, sellUid, sellJunk, tryUpgrade, dismantle, equip, unequipUid, u
 import { dismantleYield, disMatch } from '../systems/lootOpt';
 import { spinWheel, openPick, WHEEL_OPEN } from '../systems/wheel';
 import { spinDiamond, starTrade, DWHEEL_OPEN } from '../systems/diamondWheel';
+import { spinWings, WSLOT_OPEN } from '../systems/wings';
 import { itemDef, SHOP_STOCK, SHOP_SHARD_DAILY } from '../data/items';
 import { build, upgrade, collect, craft, cook, tick as settleTick } from '../systems/settlement';
 import {
@@ -431,6 +432,13 @@ export const handlers = {
     if (!DWHEEL_OPEN && !c.admin) return no('closed');
     const r = spinDiamond(s, Math.floor(Number(a.n) || 0), c.rnd, c.now); if (typeof r === 'string') return no(r);
     for (const p of r.prizes) if (p.key === 'dragon' || p.key === 'cloud') { news.push({ t: c.now, name: s.name || 'ผู้เล่น', item: p.key === 'dragon' ? 'mount_dragon' : 'pet_cloud', rar: 5 }); if (news.length > 50) news.shift(); }
+    return r;
+  },
+  /** 🎰 the wing slot machine (systems/wings.ts): diamonds are real money — the server alone spends them and rolls */
+  wingSlot(s: GameState, a: { n: number }, c: Ctx) {
+    if (!WSLOT_OPEN && !c.admin) return no('closed');
+    const r = spinWings(s, Math.floor(Number(a.n) || 0), c.rnd); if (typeof r === 'string') return no(r);
+    for (const p of r.prizes) if (p.wing && !p.stars) { news.push({ t: c.now, name: s.name || 'ผู้เล่น', item: 'wing_' + p.wing, rar: 5 }); if (news.length > 50) news.shift(); }
     return r;
   },
   starTrade(s: GameState, a: { what: 'dragon' | 'cloud' }, c: Ctx) { if (!DWHEEL_OPEN && !c.admin) return no('closed'); const r = starTrade(s, a.what === 'cloud' ? 'cloud' : 'dragon'); return r === true ? { ok: true } : no(r); },

@@ -1,5 +1,7 @@
 // Other real players in this map (net/room.ts): their own hero form, name over the head with the HP bar under it, the
 // VIP aura by card, a chat bubble when they talk. Positions are smoothed between the updates the server relays.
+import { WingView, liftSprite } from './wingView';
+import { WING_BY_ID, WING_LIFT } from '../data/wings';
 import { DELAY } from '../net/interp';
 import Phaser from 'phaser';
 import { CH, setIdle, playAnim, hasAnim, headH } from './chars';
@@ -18,7 +20,7 @@ import { SKILL_BY_ID } from '../data/skills';
 import { playSkill } from '../audio/skillSfx';
 import { fx2, hasFx2 } from './fx2';
 
-interface View { sp: Phaser.GameObjects.Sprite; sh: Phaser.GameObjects.Image; tag: Phaser.GameObjects.Text; bubble?: Phaser.GameObjects.Text; bubbleT: number; form: string; aura: number; glow?: Phaser.FX.Glow; busy: number; dir: number; moving: boolean; ride?: Riding; pet?: StormCloud; gold?: boolean; ring?: UpgRing }
+interface View { sp: Phaser.GameObjects.Sprite; sh: Phaser.GameObjects.Image; tag: Phaser.GameObjects.Text; bubble?: Phaser.GameObjects.Text; bubbleT: number; form: string; aura: number; glow?: Phaser.FX.Glow; busy: number; dir: number; moving: boolean; ride?: Riding; pet?: StormCloud; gold?: boolean; ring?: UpgRing; wing?: WingView; lift?: number }
 
 /** how far in the past other players are shown (a bit more than the 0.2 s between their updates) */
 
@@ -55,7 +57,7 @@ export class OtherPlayers {
     v.bubble = this.sc.add.text(0, 0, text, { fontFamily: 'sans-serif', fontSize: '7px', color: '#1a1410', backgroundColor: '#f3ead6', padding: { x: 3, y: 2 }, wordWrap: { width: 110 }, resolution: 6 }).setOrigin(0.5, 1).setDepth(99993);
     v.bubbleT = this.sc.time.now + 4500;
   }
-  private drop(id: string) { const v = this.views.get(id); if (!v) return; v.sp.destroy(); v.sh.destroy(); v.tag.destroy(); v.bubble?.destroy(); v.ride?.destroy(); v.pet?.destroy(); v.ring?.destroy(); this.views.delete(id); }
+  private drop(id: string) { const v = this.views.get(id); if (!v) return; v.sp.destroy(); v.sh.destroy(); v.tag.destroy(); v.bubble?.destroy(); v.ride?.destroy(); v.pet?.destroy(); v.ring?.destroy(); v.wing?.destroy(); this.views.delete(id); }
   update(dt: number) {
     const now = this.sc.time.now; this.bars.clear();
     for (const id of [...this.views.keys()]) if (!this.link.others.has(id)) this.drop(id);
@@ -75,7 +77,7 @@ export class OtherPlayers {
       const moving = dist > 12 || (!!o.mv && nowP - DELAY < (b[b.length - 1]?.t ?? 0) + 150);
       if (form !== v.form || (now > v.busy && (moving !== v.moving || o.d !== v.dir))) {
         v.form = form; v.moving = moving; v.dir = o.d;
-        if (moving && hasAnim(form, 'walk')) playAnim(v.sp, form, 'walk', o.d, true); else setIdle(v.sp, form, o.d);
+        if (moving && hasAnim(form, 'walk') && !(o.wg && !o.r)) playAnim(v.sp, form, 'walk', o.d, true); else setIdle(v.sp, form, o.d);   // (🪽 flying: legs still)
       }
       v.sp.setPosition(Math.round(o.x), Math.round(o.y)).setDepth(o.y);
       v.sh.setPosition(Math.round(o.x), Math.round(o.y));
@@ -84,11 +86,17 @@ export class OtherPlayers {
       if (v.ride && (v.ride.id !== rid || v.ride.skin !== skin)) { v.ride.destroy(); v.ride = undefined; v.sp.setAlpha(1); v.sh.setVisible(true); }
       if (rid && !v.ride) v.ride = new Riding(this.sc, rid, o.x, o.y, skin);
       if (v.ride) { v.ride.update(Math.round(o.x), Math.round(o.y), o.d, moving, form, v.sp.scaleX, now); v.sp.setAlpha(0); v.sh.setVisible(false); }
+      // their wings (🪽): float, flap, effects (low graphics: the wings only)
+      { const wid = o.wg && !rid && WING_BY_ID[o.wg] ? o.wg : '';
+        if (v.wing && v.wing.id !== wid) { v.wing.destroy(); v.wing = undefined; }
+        if (wid && !v.wing) v.wing = new WingView(this.sc, wid, !gfx.low);
+        v.lift = wid ? WING_LIFT + Math.sin(now / 230) * 1.5 : 0; liftSprite(v.sp, v.lift);
+        v.wing?.update(o.x, o.y, v.lift, headH(this.sc, form) * v.sp.scaleY, o.d, moving, now, true); }
       // their storm cloud
       const pe = o.pe && !gfx.low;   // (low graphics: other players' pets hidden)
       if (pe && !v.pet) v.pet = new StormCloud(this.sc, o.x, o.y - 30); else if (!pe && v.pet) { v.pet.destroy(); v.pet = undefined; }
       // the top of the head: the name sits on it; the HP bar only on monster maps / the Deepwild (villages: the name only)
-      const fight = /^[mw]/.test(this.link.room), head = v.ride ? v.ride.headY() : o.y - headH(this.sc, form) * v.sp.scaleY;
+      const fight = /^[mw]/.test(this.link.room), head = v.ride ? v.ride.headY() : o.y - headH(this.sc, form) * v.sp.scaleY - (v.lift ?? 0);
       v.pet?.update(o.x, o.y, o.d, now, true, head - (fight ? 6 : 1));
       { const t = Math.max(0, Math.min(2, o.wu ?? 0)); if (v.ring && v.ring.tier !== t) { v.ring.destroy(); v.ring = undefined; } if (t && !v.ring) v.ring = new UpgRing(this.sc, t); v.ring?.update(Math.round(o.x), Math.round(o.y), now, true); }   // (⚔ their +5 / +10 weapon circle)
       if (!!o.nc !== !!v.gold) { v.gold = !!o.nc; nameStyle(v.tag, v.gold, '#bfe8ff', '#06121a'); }

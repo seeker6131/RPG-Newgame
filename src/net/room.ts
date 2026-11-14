@@ -5,7 +5,7 @@ import type { RaidState, RaidEnd } from '../world/townRaidView';
 import { Track } from './interp';
 import { SERVER, accountToken } from './cloud';
 
-export interface Pos { x: number; y: number; d: number; f: string; mv: number; hp: number; a: number; r: string; lv: number; /** ⛈ cloud pet out, gold name, black horse skin (systems/cosmetics.ts) */ pe?: number; nc?: number; sk?: number; /** ⚔ weapon circle: 1 = +5, 2 = +10 */ wu?: number }
+export interface Pos { x: number; y: number; d: number; f: string; mv: number; hp: number; a: number; r: string; lv: number; /** ⛈ cloud pet out, gold name, black horse skin (systems/cosmetics.ts) */ pe?: number; nc?: number; sk?: number; /** ⚔ weapon circle: 1 = +5, 2 = +10 */ wu?: number; /** 🪽 wings out (data/wings.ts id) */ wg?: string }
 export interface Other extends Pos { id: string; name: string; tx: number; ty: number; seen: number; /** the reported spots on the sender's clock (smooth movement: net/interp.ts) */ tr: Track; ts?: number }
 export type RoomEvent = { t: 'hit'; id: string; k: string; d: number; s?: string } | { t: 'c'; id: string; name: string; text: string } | { t: 'bye'; id: string } | { t: 'join'; id: string }
   | RaidState | RaidEnd | { t: 'host'; id: string } | { t: 'ms'; a: MonRow[] } | { t: 'mhp'; sid: number; hp: number; by: string } | { t: 'mdead'; sid: number; sh: Record<string, number>; wb?: number; killer?: string; kname?: string } | { t: 'matk'; sid: number; k: string }

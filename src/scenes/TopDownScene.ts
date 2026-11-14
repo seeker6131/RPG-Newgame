@@ -37,6 +37,9 @@ import { resumeFrom } from '../core/resume';
 import { showWait, hideWait } from '../core/wait';
 import { stageFood, isHungry, heroHungry, supplyMinutes, SUPPLY_MINS } from '../systems/supplies';
 import { invSize } from '../core/state';
+import { activeWing } from '../systems/wings';
+import { WING_SPEED, WING_LIFT } from '../data/wings';
+import { WingView, liftSprite } from '../world/wingView';
 import { potOf, pickPotion, POT_CD, autoOf, potCount } from '../systems/potions';
 import { farmGoal, farmLeft, farmDone, FARM_KEYS, FARM_NAMES, type FarmGoal } from '../systems/farm';
 import { accountName } from '../net/cloud';
@@ -202,6 +205,8 @@ export class TopDownScene extends Phaser.Scene {
   hero!: Phaser.GameObjects.Sprite;
   shadow!: Phaser.GameObjects.Image;
   shLast = { x: 0, y: 0 };
+  /** 🪽 the wings on the hero (systems/wings.ts) and how high the hero floats now */
+  wingView?: WingView; wingLift = 0;
   blocked!: Uint8Array;
   keys?: Record<string, Phaser.Input.Keyboard.Key>;
   dir = 0;
@@ -463,7 +468,7 @@ export class TopDownScene extends Phaser.Scene {
     this.events.once('shutdown', () => { this.peers?.destroy(); this.link?.close(); this.peers = undefined; this.link = undefined; });
     { const onPay = (e: { sid: number; r: ReturnType<typeof act<'kill'>> }) => this.combat.onPay(e.sid, e.r); bus.on('net:pay', onPay); this.events.once('shutdown', () => bus.off('net:pay', onPay)); }
     this.heroTag = this.add.text(0, 0, S().name ?? '', { fontFamily: 'sans-serif', fontSize: '7px', color: '#ffe7a0', stroke: '#1a1006', strokeThickness: 3, resolution: 6 }).setOrigin(0.5, 1).setDepth(99991);
-    this.riding = undefined; this.rideBlockT = 0; this.pet = undefined; this.guide = undefined; this.guideTx = undefined; this.heroTagGold = false; this.walkGoal = null; this.walkMark = undefined; this.upgRing = undefined; this.autoRing = undefined; this.navGo = null;   // (scene objects are made anew on restart)
+    this.riding = undefined; this.rideBlockT = 0; this.pet = undefined; this.guide = undefined; this.guideTx = undefined; this.heroTagGold = false; this.walkGoal = null; this.walkMark = undefined; this.upgRing = undefined; this.autoRing = undefined; this.navGo = null; this.wingView = undefined; this.wingLift = 0;   // (scene objects are made anew on restart)
     this.heroRing = fx2(this, 'fx_ring_hero', this.hero.x, this.hero.y, this.hero.y - 3, 0.42)?.setOrigin(0.5, 0.5).setAlpha(0.7).setVisible(false);
     if (this.stageN && !this.wild && !this.dungeon && !this.townRaid) this.time.delayedCall(300, () => this.joinRoom());
     { const hm = homeOf(S()); if (hm.sleptAt && this.roomKind !== 'house') { const r = act('wake', {}); if (r.gained > 0) this.time.delayedCall(600, () => bus.emit(EV.TOAST, `🛏 ตื่นแล้ว! พลังพักผ่อน +${r.gained} (มี ${r.rest}) — ล่ามอนได้ EXP เพิ่ม`, '#9ad8ff')); } }
@@ -1633,7 +1638,7 @@ export class TopDownScene extends Phaser.Scene {
   /** ⛈ the storm cloud floating with the hero, the lightning arrow to this map's roaming boss, and a word when one
    *  appears on another map (polled once a minute, only for cloud owners) */
   updatePet(time: number) {
-    const s = S(), h = this.hero, want = !!activePet(s) && !this.dead;
+    const s = S(), h = this.hero, want = !!activePet(s) && !this.dead && !this.riding && !activeWing(s);   // (⛈ / 🪽 / mount: one at a time — director)
     if (want && !this.pet) this.pet = new StormCloud(this, h.x, h.y - 30);
     else if (!want && this.pet) { this.pet.destroy(); this.pet = undefined; }
     const vis = h.visible || !!this.riding, top = this.riding ? this.riding.headY() : h.y - headH(this, this.F.key) * h.scaleY;
@@ -2269,7 +2274,8 @@ export class TopDownScene extends Phaser.Scene {
     const h = this.hero; this.heroMoving = false;
     if (this.dead) { /* dying */ } else if (time < this.stunUntil) { /* dazed */ } else if (this.attacking) { /* finish the swing first */ } else if (len > 0) {
       mx /= len; my /= len;
-      const sp = 108 * (this.riding ? rideSpeed(MOUNTS[this.riding.id].speed, this.riding.skin) : vipActive(S()) ? VIP_WALK : 1) * (activePet(S()) ? CLOUD_SPEED : 1) * dt / 1000;   // (⛈ storm cloud +5%)   // VIP walks x1.15 (mounts faster)   // director: a little faster (was 92); a mount faster still (dragon > horse)
+      const wg = this.riding ? null : activeWing(S());   // (🪽 / ⛈: one at a time, never on a mount — director)
+      const sp = 108 * (this.riding ? rideSpeed(MOUNTS[this.riding.id].speed, this.riding.skin) : vipActive(S()) ? VIP_WALK : 1) * (this.riding ? 1 : wg ? WING_SPEED[wg.tier] : activePet(S()) ? CLOUD_SPEED : 1) * dt / 1000;   // (⛈ storm cloud +5%)   // VIP walks x1.15 (mounts faster)   // director: a little faster (was 92); a mount faster still (dragon > horse)
       this.heroMoving = true;
       const nx = h.x + mx * sp, ny = h.y + my * sp;
       const ok = (x: number, y: number) => this.canStand(x, y);
@@ -2277,8 +2283,8 @@ export class TopDownScene extends Phaser.Scene {
       if (ok(h.x, ny)) h.y = ny;
       const ang = Math.atan2(my, mx);                       // 0 = east
       this.dir = (Math.round(((Math.PI / 2 - ang) / (Math.PI / 4))) % 8 + 8) % 8;   // 0 = south
-      playAnim(h, this.F.key, 'walk', this.dir);
-      if (time > this.stepT) { this.stepT = time + 310; sfx.step(); }
+      if (this.wingLift > 0) setIdle(h, this.F.key, this.dir); else playAnim(h, this.F.key, 'walk', this.dir);   // (🪽 flying: the legs stay still)
+      if (time > this.stepT && !this.wingLift) { this.stepT = time + 310; sfx.step(); }
     } else if (h.anims.isPlaying && !this.attacking && !this.dead) {
       setIdle(h, this.F.key, this.dir);
     }
@@ -2299,21 +2305,30 @@ export class TopDownScene extends Phaser.Scene {
     }
     if (this.heroRing) { const fight = (!!this.stageN && !this.wild) || !!this.raid || !!this.defense; this.heroRing.setVisible(fight && h.visible && !this.dead && !this.upgRing).setPosition(h.x, h.y - 1).setDepth(h.y - 3); }   // (centred on the feet — 2px lower read as floating, director)
     { // riding: on when a mount is chosen, outdoors, not in a fight / at work (attacks and gathering get off for 2.5 s)
-      const want = mountOn(S()), can = !!want && this.inside < 0 && !this.dead && time > this.rideBlockT && mountReady(this, want);
+      const want = activeWing(S()) ? null : mountOn(S()), can = !!want && this.inside < 0 && !this.dead && time > this.rideBlockT && mountReady(this, want);
       const skin = want === 'horse' ? activeHorseSkin(S()) : null;
       if (can && (!this.riding || this.riding.id !== want || this.riding.skin !== skin)) { this.riding?.destroy(); this.riding = new Riding(this, want!, h.x, h.y, skin); this.combat.vfx.dust(h.x, h.y, 6, 16); }
       else if (!can && this.riding) { this.riding.destroy(); this.riding = undefined; this.combat.vfx.dust(h.x, h.y, 6, 16); if (h.alpha === 0) h.setAlpha(1); }
       if (this.riding) { this.riding.update(h.x, h.y, this.dir, this.heroMoving, this.F.key, h.scaleX, time); h.setAlpha(0); }
     }
+    {   // 🪽 the wings: float (legs still, the shadow stays on the ground), flap; on the ground while gathering in the Deepwild
+      const w = this.riding || this.dead || this.inside >= 0 ? null : activeWing(S()), id = w?.id ?? '';
+      if (this.wingView && this.wingView.id !== id) { this.wingView.destroy(); this.wingView = undefined; }
+      if (id && !this.wingView) this.wingView = new WingView(this, id);
+      const grounded = !w || (this.wild && S().outfit === 'gather');
+      this.wingLift = grounded ? 0 : WING_LIFT + Math.sin(time / 230) * 1.5;
+      liftSprite(h, this.wingLift);
+      this.wingView?.update(h.x, h.y, this.wingLift, headH(this, this.F.key) * h.scaleY, this.dir, this.heroMoving, time, h.visible && !this.dead);
+    }
     this.updateAura();
     this.updatePet(time);
     if (this.link) {
       const s0 = S(), d0 = derive(s0);
-      this.link.pos({ x: Math.round(h.x), y: Math.round(h.y), d: this.dir, f: this.F.key, mv: this.heroMoving ? 1 : 0, hp: Math.round(100 * s0.hp / Math.max(1, d0.maxHp)), a: auraOf(s0, vipTier(s0)), r: this.riding?.id ?? '', lv: s0.level, pe: activePet(s0) ? 1 : 0, nc: activeNameColor(s0) ? 1 : 0, sk: this.riding?.skin ? 1 : 0, wu: upgTier(weaponUpg(s0)) });
+      this.link.pos({ x: Math.round(h.x), y: Math.round(h.y), d: this.dir, f: this.F.key, mv: this.heroMoving ? 1 : 0, hp: Math.round(100 * s0.hp / Math.max(1, d0.maxHp)), a: auraOf(s0, vipTier(s0)), r: this.riding?.id ?? '', lv: s0.level, pe: this.pet ? 1 : 0, nc: activeNameColor(s0) ? 1 : 0, sk: this.riding?.skin ? 1 : 0, wu: upgTier(weaponUpg(s0)), wg: this.wingView?.id ?? '' });
       this.peers?.update(dt);
     }
     // the top of the head (director: the name sits ON the head, never over the face); the HP bar only where there is fighting
-    const head = this.riding ? this.riding.headY() : h.y - headH(this, this.F.key) * h.scaleY, fight = this.fightMap();
+    const head = this.riding ? this.riding.headY() : h.y - headH(this, this.F.key) * h.scaleY - this.wingLift, fight = this.fightMap();
     if (this.heroBubble) { if (this.time.now > this.heroBubbleT) { this.heroBubble.destroy(); this.heroBubble = undefined; } else this.heroBubble.setPosition(Math.round(h.x), Math.round(head - (fight ? 16 : 12))); }
     if (this.heroBar) {   // the name over the head, the HP bar between them (monster maps only)
       const s0 = S(); this.heroBar.clear();
@@ -2364,9 +2379,10 @@ export class TopDownScene extends Phaser.Scene {
     if (!this.dead) {   // the shadow breathes with the steps while walking (a foot lifts = a touch smaller), still when standing
       const mv = Math.hypot(h.x - this.shLast.x, h.y - this.shLast.y) > 0.2; this.shLast = { x: h.x, y: h.y };
       const k = mv && !this.riding ? 1 - 0.07 * Math.abs(Math.sin(time / 95)) : 1;
-      this.shadow.setPosition(h.x, h.y - 1).setScale(k, 1 - (1 - k) * 0.5);
+      const fl = this.wingLift > 0 ? 0.82 : 1;   // (🪽 floating: a smaller shadow left on the ground)
+      this.shadow.setPosition(h.x, h.y - 1).setScale(k * fl, (1 - (1 - k) * 0.5) * fl);
     }
-    { const t = titleOf(S()); this.titleTx.setText(t ? `「${t}」` : '').setPosition(h.x, h.y - 46).setVisible(!this.dead); }
+    { const t = titleOf(S()); this.titleTx.setText(t ? `「${t}」` : '').setPosition(h.x, h.y - 46 - this.wingLift).setVisible(!this.dead); }
     for (const [i, l] of this.lamps.entries()) l.setAlpha((0.75 + Math.sin(time / 180 + i * 1.7) * 0.12) * (l.getData('base') ?? 1));
     this.updateDayNight(time);
     for (const [i, f] of this.fires.entries()) {
